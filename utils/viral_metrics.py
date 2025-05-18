@@ -102,7 +102,7 @@ def calculate_viral_score(current_data, previous_data=None):
         result.append(video_with_metrics)
     
     # Сортировка по viral_score (от высокого к низкому)
-    result.sort(key=lambda x: x["viral_score"], reverse=True)
+    result.sort(key=lambda x: float(x["viral_score"]), reverse=True)
     
     return result
 
@@ -123,10 +123,17 @@ def _convert_to_int(value):
         return int(value)
     
     if isinstance(value, str):
+        if value.lower() == 'n/a':
+            return 0
+            
         try:
-            # Удаляем все нецифровые символы
-            clean_str = ''.join(c for c in value if c.isdigit())
-            return int(clean_str) if clean_str else 0
+            # Удаляем все нецифровые символы, кроме десятичной точки
+            clean_str = ''.join(c for c in value if c.isdigit() or c == '.')
+            if clean_str:
+                if '.' in clean_str:
+                    return int(float(clean_str))
+                return int(clean_str)
+            return 0
         except:
             return 0
     

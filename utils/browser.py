@@ -1,52 +1,107 @@
-from selenium import webdriver
-from selenium.webdriver.chrome.options import Options
-from selenium.webdriver.chrome.service import Service
-from webdriver_manager.chrome import ChromeDriverManager
 import random
 import time
+import os
+import pickle
+from selenium import webdriver
+from selenium.webdriver.firefox.options import Options
+from selenium.webdriver.firefox.service import Service
 
-def setup_driver():
+def setup_driver(headless=True):
     """
-    Настраивает и возвращает экземпляр веб-драйвера Chrome
+    Настраивает и возвращает экземпляр веб-драйвера Firefox
     
+    Args:
+        headless (bool): Запускать браузер в фоновом режиме без UI
+        
     Returns:
-        WebDriver: Настроенный экземпляр веб-драйвера
+        WebDriver: Экземпляр веб-драйвера или None в случае ошибки
     """
     # Список user-agent для имитации разных браузеров
     user_agents = [
         'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/96.0.4664.110 Safari/537.36',
-        'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/96.0.4664.45 Safari/537.36',
-        'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/15.0 Safari/605.1.15',
-        'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:94.0) Gecko/20100101 Firefox/94.0',
-        'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/96.0.4664.93 Safari/537.36 Edg/96.0.1054.53'
+        'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:100.0) Gecko/20100101 Firefox/100.0'
     ]
     
-    # Настройка опций
-    options = Options()
-    options.add_argument(f"--user-agent={random.choice(user_agents)}")
-    options.add_argument("--window-size=1920,1080")
-    options.add_argument("--disable-blink-features=AutomationControlled")
-    options.add_experimental_option("excludeSwitches", ["enable-automation"])
-    options.add_experimental_option('useAutomationExtension', False)
+    try:
+        # Настройка опций Firefox
+        options = Options()
+        options.set_preference("general.useragent.override", random.choice(user_agents))
+        options.set_preference("dom.webdriver.enabled", False)
+        options.set_preference("useAutomationExtension", False)
+        
+        # Фоновый режим (без интерфейса)
+        if headless:
+            options.add_argument("--headless")
+        
+        # Путь к geckodriver
+        gecko_path = "./geckodriver.exe"  # Или "geckodriver" для Linux/Mac
+        
+        # Инициализация драйвера
+        service = Service(executable_path=gecko_path)
+        driver = webdriver.Firefox(service=service, options=options)
+        
+        return driver
+    except Exception as e:
+        print(f"Ошибка при настройке драйвера Firefox: {e}")
+        return None
+
+def save_cookies(driver, platform):
+    """
+    Сохраняет cookies после авторизации на платформе
     
-    # В некоторых случаях headless режим может быть обнаружен
-    # options.add_argument("--headless")
+    Args:
+        driver: WebDriver экземпляр
+        platform (str): Название платформы (youtube, tiktok, instagram, vk)
+    """
+    cookies_dir = os.path.join(os.getcwd(), "cookies")
+    os.makedirs(cookies_dir, exist_ok=True)
     
-    # Инициализация сервиса и драйвера
-    service = Service(ChromeDriverManager().install())
-    driver = webdriver.Chrome(service=service, options=options)
+    cookies_file = os.path.join(cookies_dir, f"{platform}_cookies.pkl")
+    pickle.dump(driver.get_cookies(), open(cookies_file, "wb"))
+    print(f"Cookies для {platform} сохранены")
+
+def load_cookies(driver, platform):
+    """
+    Загружает сохраненные cookies для платформы
     
-    # Обход обнаружения веб-драйвера
-    driver.execute_script("Object.defineProperty(navigator, 'webdriver', {get: () => undefined})")
+    Args:
+        driver: WebDriver экземпляр
+        platform (str): Название платформы (youtube, tiktok, instagram, vk)
+        
+    Returns:
+        bool: True если cookies были загружены, иначе False
+    """
+    cookies_file = os.path.join(os.getcwd(), "cookies", f"{platform}_cookies.pkl")
     
-    return driver
+    if os.path.exists(cookies_file):
+        cookies = pickle.load(open(cookies_file, "rb"))
+        # Сначала переходим на домен
+        domain_urls = {
+            "youtube": "https://www.youtube.com",
+            "tiktok": "https://www.tiktok.com",
+            "instagram": "https://www.instagram.com",
+            "vk": "https://vk.com"
+        }
+        
+        driver.get(domain_urls.get(platform, "https://www.google.com"))
+        
+        # Загружаем cookies
+        for cookie in cookies:
+            try:
+                driver.add_cookie(cookie)
+            except:
+                pass
+                
+        print(f"Cookies для {platform} загружены")
+        return True
+    return False
 
 def human_like_scroll(driver, scroll_count=5):
     """
     Имитирует человеческое поведение при прокрутке страницы
     
     Args:
-        driver: Selenium WebDriver
+        driver: WebDriver экземпляр
         scroll_count (int): Количество прокруток
     """
     for i in range(scroll_count):

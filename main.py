@@ -1,8 +1,9 @@
 import argparse
 import time
-import pandas as pd
 import os
+import csv
 from datetime import datetime
+import pickle
 
 # Импорт модулей парсеров
 from parsers.youtube_parser import parse_youtube_shorts
@@ -13,6 +14,51 @@ from parsers.vk_parser import parse_vk_clips
 # Утилиты
 from utils.viral_metrics import calculate_viral_score
 from utils.storage import save_to_csv, load_previous_data
+from utils.browser import setup_driver, save_cookies
+
+def setup_auth_session():
+    """Создает сессию для авторизации и сохранения cookies"""
+    platforms = {
+        "youtube": "https://www.youtube.com",
+        "tiktok": "https://www.tiktok.com",
+        "instagram": "https://www.instagram.com",
+        "vk": "https://vk.com"
+    }
+    
+    print("=== Настройка авторизации для парсера ===")
+    
+    # Создаем папку для cookies
+    os.makedirs("cookies", exist_ok=True)
+    
+    for platform, url in platforms.items():
+        choice = input(f"Настроить авторизацию для {platform}? (y/n): ")
+        if choice.lower() == 'y':
+            driver = None
+            try:
+                # Запускаем браузер с видимым интерфейсом
+                driver = setup_driver(headless=False)
+                if not driver:
+                    print(f"Не удалось запустить браузер для {platform}")
+                    continue
+                
+                # Открываем страницу
+                print(f"Открываю {platform}... Пожалуйста, авторизуйтесь!")
+                driver.get(url)
+                
+                # Ждем авторизацию пользователя
+                input(f"После авторизации на {platform}, нажмите Enter для сохранения cookies...")
+                
+                # Сохраняем cookies
+                save_cookies(driver, platform)
+                
+            except Exception as e:
+                print(f"Ошибка при настройке авторизации для {platform}: {e}")
+            
+            finally:
+                if driver:
+                    driver.quit()
+    
+    print("Настройка авторизации завершена!")
 
 def main():
     parser = argparse.ArgumentParser(description='Парсер виральных видео')
@@ -21,47 +67,54 @@ def main():
     parser.add_argument('--platforms', type=str, default='all', 
                       help='Платформы для парсинга (youtube,tiktok,instagram,vk или all)')
     parser.add_argument('--visualize', action='store_true', help='Создать визуализацию результатов')
+    parser.add_argument('--setup-auth', action='store_true', help='Настроить авторизацию для платформ')
+    
     args = parser.parse_args()
+    
+    # Настройка авторизации, если запрошено
+    if args.setup_auth:
+        setup_auth_session()
+        return
     
     print(f"Начинаю сбор данных по запросу: '{args.query}'")
     
-    # Создаем директории, если их нет
+    # Создаем директории
     os.makedirs("data", exist_ok=True)
     os.makedirs("data/history", exist_ok=True)
     
-    platforms = args.platforms.lower().split(',') if args.platforms != 'all' else ['youtube', 'tiktok', 'instagram', 'vk']
+    # Определяем платформы для сбора
+    available_platforms = {
+        'youtube': parse_youtube_shorts,
+        'tiktok': parse_tiktok,
+        'instagram': parse_instagram_reels,
+        'vk': parse_vk_clips
+    }
+    
+    selected_platforms = {}
+    if args.platforms == 'all':
+        selected_platforms = available_platforms
+    else:
+        platform_list = args.platforms.lower().split(',')
+        for platform in platform_list:
+            if platform in available_platforms:
+                selected_platforms[platform] = available_platforms[platform]
+    
+    # Собираем данные с каждой платформы
     all_results = []
     
-    # YouTube Shorts
-    if 'youtube' in platforms:
-        print("Сбор данных с YouTube Shorts...")
-        youtube_results = parse_youtube_shorts(args.query, args.limit)
-        all_results.extend(youtube_results)
-        print(f"Собрано {len(youtube_results)} видео с YouTube Shorts")
-        time.sleep(3)
-    
-    # TikTok
-    if 'tiktok' in platforms:
-        print("Сбор данных с TikTok...")
-        tiktok_results = parse_tiktok(args.query, args.limit)
-        all_results.extend(tiktok_results)
-        print(f"Собрано {len(tiktok_results)} видео с TikTok")
-        time.sleep(3)
-    
-    # Instagram Reels
-    if 'instagram' in platforms:
-        print("Сбор данных с Instagram Reels...")
-        instagram_results = parse_instagram_reels(args.query, args.limit)
-        all_results.extend(instagram_results)
-        print(f"Собрано {len(instagram_results)} видео с Instagram Reels")
-        time.sleep(3)
-    
-    # ВК Клипы
-    if 'vk' in platforms:
-        print("Сбор данных с ВК Клипов...")
-        vk_results = parse_vk_clips(args.query, args.limit)
-        all_results.extend(vk_results)
-        print(f"Собрано {len(vk_results)} видео с ВК Клипов")
+    for platform_name, parse_func in selected_platforms.items():
+        print(f"Сбор данных с {platform_name}...")
+        start_time = time.time()
+        
+        try:
+            platform_results = parse_func(args.query, args.limit)
+            all_results.extend(platform_results)
+            print(f"Собрано {len(platform_results)} видео с {platform_name}")
+        except Exception as e:
+            print(f"Ошибка при сборе данных с {platform_name}: {e}")
+        
+        # Пауза между платформами
+        time.sleep(2)
     
     # Загрузка предыдущих данных для сравнения
     previous_data = load_previous_data(args.query)
@@ -79,27 +132,29 @@ def main():
         history_filename = f"data/history/viral_videos_{args.query.replace(' ', '_')}_{timestamp}.csv"
         save_to_csv(results_with_metrics, history_filename)
         
-        print(f"Данные сохранены в {filename}")
         print(f"Всего собрано {len(results_with_metrics)} видео со всех платформ")
         
-        # Top-10 по виральности
-        df = pd.DataFrame(results_with_metrics)
-        top10 = df.sort_values(by='viral_score', ascending=False).head(10)
-        
+        # Показываем топ-10 по виральности
         print("\nТоп-10 самых виральных видео:")
-        for i, (_, row) in enumerate(top10.iterrows(), 1):
-            title = row['title']
-            if isinstance(title, str) and len(title) > 50:
-                title = title[:47] + "..."
-            
-            print(f"{i}. [{row['platform']}] {title} ({row['url']})")
-            print(f"   Просмотры: {row['views']}, Лайки: {row['likes']}, Вирал. скор: {row['viral_score']}")
-            
+        for i, item in enumerate(results_with_metrics[:10], 1):
+            title = item.get('title', '')
+            if isinstance(title, str) and len(title) > 40:
+                title = title[:37] + "..."
+                
+            print(f"{i}. [{item.get('platform')}] {title}")
+            print(f"   👁️ {item.get('views', 'N/A')} | 👍 {item.get('likes', 'N/A')} | 💬 {item.get('comments', 'N/A')}")
+            print(f"   URL: {item.get('url', 'N/A')}")
+        
         # Визуализация если требуется
         if args.visualize:
-            from visualization.dashboard import generate_dashboard
-            dashboard_file = generate_dashboard(results_with_metrics, args.query)
-            print(f"\nВизуализация сохранена в {dashboard_file}")
+            try:
+                from visualization.dashboard import generate_dashboard
+                dashboard_file = generate_dashboard(results_with_metrics, args.query)
+                print(f"\nВизуализация сохранена в {dashboard_file}")
+            except ImportError:
+                print("\nДля визуализации требуются matplotlib и seaborn. Установите их: pip install matplotlib seaborn")
+            except Exception as e:
+                print(f"\nОшибка при создании визуализации: {e}")
     else:
         print("Не удалось собрать данные. Проверьте запрос или соединение.")
 

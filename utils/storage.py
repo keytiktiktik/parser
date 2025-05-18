@@ -1,7 +1,8 @@
 import os
-import pandas as pd
+import csv
 import glob
 import time
+from datetime import datetime
 
 def save_to_csv(data, filename):
     """
@@ -10,16 +11,34 @@ def save_to_csv(data, filename):
     Args:
         data (list): Список словарей с данными
         filename (str): Имя файла для сохранения
+        
+    Returns:
+        bool: True если успешно, иначе False
     """
     try:
-        df = pd.DataFrame(data)
-        
         # Создаем директорию, если её нет
         os.makedirs(os.path.dirname(filename), exist_ok=True)
         
-        # Сохраняем в CSV
-        df.to_csv(filename, index=False, encoding='utf-8-sig')
+        if not data:
+            print(f"Нет данных для сохранения в {filename}")
+            return False
+            
+        # Определяем заголовки (все возможные ключи)
+        fieldnames = set()
+        for item in data:
+            fieldnames.update(item.keys())
+        
+        fieldnames = sorted(list(fieldnames))
+        
+        # Записываем данные
+        with open(filename, 'w', newline='', encoding='utf-8-sig') as f:
+            writer = csv.DictWriter(f, fieldnames=fieldnames)
+            writer.writeheader()
+            writer.writerows(data)
+            
+        print(f"Данные сохранены в {filename}")
         return True
+        
     except Exception as e:
         print(f"Ошибка при сохранении данных в CSV: {e}")
         return False
@@ -54,8 +73,22 @@ def load_previous_data(query=None):
             print(f"Предупреждение: последний файл данных старше 7 дней ({latest_file})")
         
         # Загружаем данные
-        df = pd.read_csv(latest_file)
-        return df.to_dict('records')
+        result = []
+        with open(latest_file, 'r', encoding='utf-8-sig') as f:
+            reader = csv.DictReader(f)
+            for row in reader:
+                # Преобразуем числовые значения к числам
+                for key in row:
+                    if key in ['views', 'likes', 'comments', 'shares', 'views_growth', 
+                               'likes_growth', 'comments_growth', 'views_velocity', 
+                               'likes_velocity', 'comments_velocity', 'viral_score']:
+                        try:
+                            row[key] = int(float(row[key])) if '.' in row[key] else int(row[key])
+                        except (ValueError, TypeError):
+                            pass
+                result.append(row)
+                
+        return result
     
     except Exception as e:
         print(f"Ошибка при загрузке предыдущих данных: {e}")
@@ -86,17 +119,23 @@ def get_history_for_video(video_id, platform=None):
         
         # Ищем видео во всех файлах
         for file in files:
-            df = pd.read_csv(file)
-            
-            # Фильтруем по ID и платформе
-            filters = df['video_id'] == video_id
-            if platform:
-                filters &= df['platform'] == platform
+            with open(file, 'r', encoding='utf-8-sig') as f:
+                reader = csv.DictReader(f)
                 
-            video_data = df[filters].to_dict('records')
-            
-            if video_data:
-                history.append(video_data[0])
+                for row in reader:
+                    # Фильтруем по ID и платформе
+                    if row.get('video_id') == video_id:
+                        if platform is None or row.get('platform') == platform:
+                            # Преобразуем числовые значения
+                            for key in row:
+                                if key in ['views', 'likes', 'comments', 'shares', 'views_growth', 
+                                           'likes_growth', 'comments_growth', 'views_velocity', 
+                                           'likes_velocity', 'comments_velocity', 'viral_score']:
+                                    try:
+                                        row[key] = int(float(row[key])) if '.' in row[key] else int(row[key])
+                                    except (ValueError, TypeError):
+                                        pass
+                            history.append(row)
         
         return history
     
