@@ -36,7 +36,10 @@ def save_to_csv(data, filename):
             writer.writeheader()
             writer.writerows(data)
             
-        print(f"Данные сохранены в {filename}")
+        # Убираем дублирующее сообщение - здесь будем выводить только при сохранении в основной файл, 
+        # а не в history
+        if not '/history/' in filename:
+            print(f"Данные сохранены в {filename}")
         return True
         
     except Exception as e:
@@ -92,53 +95,4 @@ def load_previous_data(query=None):
     
     except Exception as e:
         print(f"Ошибка при загрузке предыдущих данных: {e}")
-        return []
-
-def get_history_for_video(video_id, platform=None):
-    """
-    Получает историю метрик для конкретного видео
-    
-    Args:
-        video_id (str): ID видео
-        platform (str, optional): Название платформы
-        
-    Returns:
-        list: Список словарей с историческими данными
-    """
-    try:
-        # Находим все CSV-файлы в папке history
-        files = glob.glob("data/history/*.csv")
-        
-        if not files:
-            return []
-        
-        # Сортируем файлы по времени создания (от старого к новому)
-        files.sort(key=lambda x: os.path.getmtime(x))
-        
-        history = []
-        
-        # Ищем видео во всех файлах
-        for file in files:
-            with open(file, 'r', encoding='utf-8-sig') as f:
-                reader = csv.DictReader(f)
-                
-                for row in reader:
-                    # Фильтруем по ID и платформе
-                    if row.get('video_id') == video_id:
-                        if platform is None or row.get('platform') == platform:
-                            # Преобразуем числовые значения
-                            for key in row:
-                                if key in ['views', 'likes', 'comments', 'shares', 'views_growth', 
-                                           'likes_growth', 'comments_growth', 'views_velocity', 
-                                           'likes_velocity', 'comments_velocity', 'viral_score']:
-                                    try:
-                                        row[key] = int(float(row[key])) if '.' in row[key] else int(row[key])
-                                    except (ValueError, TypeError):
-                                        pass
-                            history.append(row)
-        
-        return history
-    
-    except Exception as e:
-        print(f"Ошибка при получении истории для видео {video_id}: {e}")
         return []

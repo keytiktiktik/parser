@@ -1,2 +1,7 @@
-
+venv
 venv_py312
+data
+parsers/__pycache__
+utils/__pycache__
+visualization/__pycache__
+visualization/output

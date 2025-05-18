@@ -34,7 +34,7 @@ def setup_driver(headless=True):
             options.add_argument("--headless")
         
         # Путь к geckodriver
-        gecko_path = "./geckodriver.exe"  # Или "geckodriver" для Linux/Mac
+        gecko_path = "./geckodriver"  # Или "geckodriver" для Linux/Mac
         
         # Инициализация драйвера
         service = Service(executable_path=gecko_path)
