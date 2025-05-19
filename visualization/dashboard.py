@@ -9,6 +9,7 @@ from collections import Counter
 import nltk
 from nltk.tokenize import word_tokenize
 from nltk.corpus import stopwords
+from nltk.util import ngrams
 
 # Скачиваем необходимые данные для NLTK при первом использовании
 try:
@@ -50,8 +51,8 @@ def generate_dashboard(data, query):
         # Создаем директорию для визуализаций
         os.makedirs('visualization/output', exist_ok=True)
         
-        # Создаем фигуру и сетку подграфиков для 2x3 графиков
-        fig = plt.figure(figsize=(20, 16))
+        # Создаем фигуру и сетку подграфиков для 3x2 графиков
+        fig = plt.figure(figsize=(22, 18))
         plt.clf()  # Очищаем фигуру перед использованием
         
         # Заголовок
@@ -83,28 +84,53 @@ def generate_dashboard(data, query):
                     horizontalalignment='center', verticalalignment='center', fontsize=12)
             plt.title('Топ-10 видео по просмотрам')
         
-        # 3. Вопросительные ключевые слова
+        # 3. Анализ сочетаний слов (n-grams)
         plt.subplot(3, 2, 3)
-        question_keywords = analyze_question_keywords(df['title'].tolist())
-        plot_keywords(question_keywords, "Ключевые слова вопросного типа", plt)
+        keyword_phrases = analyze_keyword_phrases(df['title'].tolist())
+        plot_keywords(keyword_phrases, "Популярные словосочетания", plt)
         
-        # 4. Распределение видео по платформам
+        # 4. Распределение видео по возрасту (дням)
         plt.subplot(3, 2, 4)
-        platform_counts = df['platform'].value_counts()
-        if len(platform_counts) > 0:
-            plt.pie(platform_counts, labels=platform_counts.index, autopct='%1.1f%%', startangle=90, 
-                   colors=sns.color_palette('viridis', len(platform_counts)))
-            plt.axis('equal')
-            plt.title('Распределение видео по платформам')
+        if 'days_ago' in df.columns and len(df) > 0:
+            try:
+                # Конвертируем в числовой формат, если нужно
+                if df['days_ago'].dtype == 'object':
+                    df['days_ago_num'] = pd.to_numeric(df['days_ago'], errors='coerce')
+                else:
+                    df['days_ago_num'] = df['days_ago']
+                
+                # Создаем bins для гистограммы
+                bins = [0, 1, 3, 7, 14, 30, 60, 90, 180, 365]
+                labels = ['1 день', '2-3 дня', '4-7 дней', '1-2 недели', '2-4 недели', 
+                          '1-2 месяца', '2-3 месяца', '3-6 месяцев', '6-12 месяцев']
+                
+                df['age_group'] = pd.cut(df['days_ago_num'], bins=bins, labels=labels, right=False)
+                age_counts = df['age_group'].value_counts().sort_index()
+                
+                if len(age_counts) > 0:
+                    sns.barplot(x=age_counts.index, y=age_counts.values, palette='viridis')
+                    plt.xticks(rotation=45, ha='right')
+                    plt.xlabel('Возраст видео')
+                    plt.ylabel('Количество видео')
+                    plt.title('Распределение видео по возрасту')
+                else:
+                    plt.text(0.5, 0.5, 'Недостаточно данных для анализа', 
+                            horizontalalignment='center', verticalalignment='center', fontsize=12)
+                    plt.title('Распределение видео по возрасту')
+            except Exception as e:
+                print(f"Ошибка при анализе возраста видео: {e}")
+                plt.text(0.5, 0.5, 'Ошибка при анализе возраста видео', 
+                        horizontalalignment='center', verticalalignment='center', fontsize=12)
+                plt.title('Распределение видео по возрасту')
         else:
             plt.text(0.5, 0.5, 'Недостаточно данных для анализа', 
                     horizontalalignment='center', verticalalignment='center', fontsize=12)
-            plt.title('Распределение видео по платформам')
+            plt.title('Распределение видео по возрасту')
         
-        # 5. Matching keywords (сопоставление с запросом)
+        # 5. Вопросительные ключевые слова
         plt.subplot(3, 2, 5)
-        matching_keywords = analyze_matching_keywords(df['title'].tolist(), query)
-        plot_keywords(matching_keywords, "Точные совпадения с запросом", plt)
+        question_keywords = analyze_question_keywords(df['title'].tolist())
+        plot_keywords(question_keywords, "Ключевые слова вопросного типа", plt)
         
         # 6. Поисковый объем и ключевые слова
         plt.subplot(3, 2, 6)
@@ -160,6 +186,37 @@ def analyze_keywords(titles, query):
         print(f"Ошибка при анализе ключевых слов: {e}")
         return []
 
+def analyze_keyword_phrases(titles, min_length=2, max_length=3):
+    """Анализирует сочетания слов (n-grams) в заголовках"""
+    try:
+        # Составляем стоп-слова
+        stop_words = set(stopwords.words('russian') + stopwords.words('english'))
+        custom_stop = ['как', 'для', 'the', 'что', 'это', 'все', 'без', 'или']
+        stop_words.update(custom_stop)
+        
+        # Подсчет n-gram
+        ngram_counts = Counter()
+        
+        for title in titles:
+            if not isinstance(title, str):
+                continue
+                
+            # Токенизация и очистка
+            words = word_tokenize(title.lower())
+            words = [word for word in words if word.isalpha() and len(word) > 2 and word not in stop_words]
+            
+            # Подсчет ngrams разной длины
+            for n in range(min_length, min(max_length + 1, len(words) + 1)):
+                title_ngrams = ngrams(words, n)
+                for ngram in title_ngrams:
+                    ngram_counts[' '.join(ngram)] += 1
+        
+        # Берем топ-15 сочетаний
+        return ngram_counts.most_common(15)
+    except Exception as e:
+        print(f"Ошибка при анализе сочетаний слов: {e}")
+        return []
+
 def analyze_question_keywords(titles):
     """Анализирует вопросительные слова в заголовках"""
     try:
@@ -182,30 +239,6 @@ def analyze_question_keywords(titles):
         return phrase_counts.most_common(10)
     except Exception as e:
         print(f"Ошибка при анализе вопросительных ключевых слов: {e}")
-        return []
-
-def analyze_matching_keywords(titles, query):
-    """Анализирует совпадающие ключевые слова с запросом"""
-    try:
-        query_words = set(query.lower().split())
-        matching = []
-        
-        for title in titles:
-            if not isinstance(title, str):
-                continue
-                
-            title_words = set(word.lower() for word in word_tokenize(title) if word.isalpha())
-            # Находим общие слова между заголовком и запросом
-            common_words = title_words.intersection(query_words)
-            matching.extend(common_words)
-        
-        # Подсчет частоты
-        match_counts = Counter(matching)
-        
-        # Возвращаем все совпадения
-        return match_counts.most_common()
-    except Exception as e:
-        print(f"Ошибка при анализе совпадающих ключевых слов: {e}")
         return []
 
 def plot_keywords(keywords, title, plt):

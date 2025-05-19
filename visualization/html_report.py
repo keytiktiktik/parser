@@ -37,6 +37,7 @@ def generate_html_report(data, query):
         # Анализ ключевых слов
         all_titles = [item.get('title', '') for item in data]
         keywords = analyze_keywords(all_titles)
+        keyword_phrases = analyze_keyword_phrases(all_titles)  # Добавлен анализ сочетаний слов
         question_keywords = analyze_question_keywords(all_titles)
         matching_keywords = analyze_matching_keywords(all_titles, query)
         keywords_by_views = analyze_keywords_by_views(data)
@@ -64,6 +65,7 @@ def generate_html_report(data, query):
                 .info {{ color: #3498db; }}
                 a {{ color: #2980b9; text-decoration: none; }}
                 a:hover {{ text-decoration: underline; }}
+                .date-info {{ color: #e74c3c; font-weight: bold; }}
             </style>
         </head>
         <body>
@@ -72,6 +74,7 @@ def generate_html_report(data, query):
                 <p><strong>Дата создания:</strong> {datetime.now().strftime("%Y-%m-%d %H:%M:%S")}</p>
                 <p><strong>Всего собрано видео:</strong> {len(data)}</p>
                 <p><strong>Общее количество просмотров:</strong> {sum(item.get('views', 0) for item in data):,}</p>
+                <p><span class="date-info">⚠️ Фильтр по дате:</span> Только видео за последние {data[0].get('days_ago', 'Неизвестно')} дней</p>
             </div>
             
             <div class="section">
@@ -85,6 +88,7 @@ def generate_html_report(data, query):
                         <th>Лайки</th>
                         <th>Комментарии</th>
                         <th>Дата публикации</th>
+                        <th>Дней назад</th>
                         <th>Ссылка</th>
                     </tr>
         """
@@ -95,15 +99,30 @@ def generate_html_report(data, query):
             if len(title) > 50:
                 title = title[:47] + "..."
                 
+            # Форматирование числовых значений
+            views = f"{item.get('views', 0):,}"
+            likes = f"{item.get('likes', 0):,}"
+            comments = f"{item.get('comments', 0):,}"
+            
+            # Обработка даты публикации
+            pub_date = item.get('publish_date_formatted', 'Неизвестно')
+            days_ago = item.get('days_ago', 'Неизвестно')
+            
+            # Проверка возраста видео для выделения старых видео
+            date_style = ""
+            if isinstance(days_ago, int) and days_ago > 30:
+                date_style = ' style="color:red;"'
+                
             html_content += f"""
                     <tr>
                         <td>{i}</td>
                         <td>{item.get('platform', '')}</td>
                         <td>{title}</td>
-                        <td>{item.get('views', 0):,}</td>
-                        <td>{item.get('likes', 0):,}</td>
-                        <td>{item.get('comments', 0):,}</td>
-                        <td>{item.get('publish_time', 'Неизвестно')}</td>
+                        <td>{views}</td>
+                        <td>{likes}</td>
+                        <td>{comments}</td>
+                        <td{date_style}>{pub_date}</td>
+                        <td{date_style}>{days_ago}</td>
                         <td><a href="{item.get('url', '#')}" target="_blank">Открыть</a></td>
                     </tr>
             """
@@ -116,10 +135,10 @@ def generate_html_report(data, query):
                 <h2>Анализ ключевых слов</h2>
         """
         
-        # Анализ ключевых слов
+        # Анализ отдельных ключевых слов
         html_content += """
                 <div class="keyword-table">
-                    <h3>Связанные ключевые слова</h3>
+                    <h3>Отдельные ключевые слова</h3>
                     <table>
                         <tr>
                             <th>Слово</th>
@@ -138,6 +157,35 @@ def generate_html_report(data, query):
         html_content += """
                     </table>
                 </div>
+        """
+        
+        # Словосочетания (n-grams)
+        html_content += """
+                <div class="keyword-table">
+                    <h3>Популярные словосочетания</h3>
+                    <table>
+                        <tr>
+                            <th>Фраза</th>
+                            <th>Частота</th>
+                        </tr>
+        """
+        
+        for phrase, count in keyword_phrases[:15]:
+            html_content += f"""
+                        <tr>
+                            <td>{phrase}</td>
+                            <td>{count}</td>
+                        </tr>
+            """
+        
+        html_content += """
+                    </table>
+                </div>
+                <div class="clearfix"></div>
+            </div>
+            
+            <div class="section">
+                <h2>Анализ запросов</h2>
         """
         
         # Вопросительные ключевые слова
@@ -162,11 +210,6 @@ def generate_html_report(data, query):
         html_content += """
                     </table>
                 </div>
-                <div class="clearfix"></div>
-            </div>
-            
-            <div class="section">
-                <h2>Анализ запросов и метрик</h2>
         """
         
         # Matching keywords
@@ -191,6 +234,11 @@ def generate_html_report(data, query):
         html_content += """
                     </table>
                 </div>
+                <div class="clearfix"></div>
+            </div>
+            
+            <div class="section">
+                <h2>Анализ по просмотрам</h2>
         """
         
         # Ключевые слова по просмотрам
@@ -280,6 +328,54 @@ def analyze_keywords(titles):
         return sorted_words
     except Exception as e:
         print(f"Ошибка при анализе ключевых слов: {e}")
+        return []
+
+def analyze_keyword_phrases(titles, min_length=2, max_length=4):
+    """
+    Анализирует сочетания слов (n-grams) в заголовках
+    
+    Args:
+        titles (list): Список заголовков
+        min_length (int): Минимальная длина n-gram
+        max_length (int): Максимальная длина n-gram
+        
+    Returns:
+        list: Список кортежей (фраза, частота)
+    """
+    try:
+        # Стоп-слова (русские и английские)
+        stop_words = {
+            'и', 'в', 'на', 'с', 'по', 'для', 'за', 'от', 'к', 'у', 'из', 'о', 'при', 'во', 'со',
+            'the', 'a', 'an', 'and', 'or', 'but', 'in', 'on', 'at', 'to', 'for', 'with', 'by',
+            'как', 'что', 'кто', 'где', 'когда', 'почему', 'чтобы', 'это', 'этот', 'эта', 'эти',
+            'of', 'from', 'это', 'не', 'да', 'нет', 'же'
+        }
+        
+        # Словарь для подсчета n-gram
+        ngram_counts = {}
+        
+        for title in titles:
+            if not isinstance(title, str):
+                continue
+                
+            # Очистка и токенизация
+            cleaned_title = re.sub(r'[^\w\s]', ' ', title.lower())
+            words = [w for w in cleaned_title.split() if w not in stop_words and len(w) > 2]
+            
+            # Генерация n-grams разной длины
+            for n in range(min_length, min(max_length + 1, len(words) + 1)):
+                for i in range(len(words) - n + 1):
+                    ngram = ' '.join(words[i:i+n])
+                    ngram_counts[ngram] = ngram_counts.get(ngram, 0) + 1
+        
+        # Фильтруем n-grams, которые встречаются минимум 2 раза
+        filtered_ngrams = {k: v for k, v in ngram_counts.items() if v >= 2}
+        
+        # Сортировка по частоте
+        sorted_ngrams = sorted(filtered_ngrams.items(), key=lambda x: x[1], reverse=True)
+        return sorted_ngrams
+    except Exception as e:
+        print(f"Ошибка при анализе сочетаний слов: {e}")
         return []
 
 def analyze_question_keywords(titles):
