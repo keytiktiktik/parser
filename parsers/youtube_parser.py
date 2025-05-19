@@ -165,10 +165,11 @@ def parse_youtube_shorts(query, limit=1000, days_ago=30, strict_query_match=True
 
                 collected_video_ids.add(video_id)
 
-                # Извлекаем метрики
-                view_count = video.get('view_count', 0)
-                like_count = video.get('like_count', 0) 
-                comment_count = video.get('comment_count', 0)
+                # Извлекаем метрики и безопасно преобразуем их в строки
+                view_count = _safe_str(video.get('view_count', 0))
+                like_count = _safe_str(video.get('like_count', 0))
+                comment_count = _safe_str(video.get('comment_count', 0))
+                share_count = _safe_str(video.get('repost_count', 0))
                 
                 # Формируем дату публикации для отображения
                 if isinstance(video_date, datetime):
@@ -181,10 +182,10 @@ def parse_youtube_shorts(query, limit=1000, days_ago=30, strict_query_match=True
                     'title': video.get('title', 'Неизвестно'),
                     'url': f"https://www.youtube.com/shorts/{video_id}",
                     'video_id': video_id,
-                    'views': str(view_count),
-                    'likes': str(like_count), 
-                    'comments': str(comment_count),
-                    'shares': str(video.get('repost_count', 0)),
+                    'views': view_count,
+                    'likes': like_count,
+                    'comments': comment_count,
+                    'shares': share_count,
                     'publish_time': upload_date,
                     'publish_date_formatted': publish_date_formatted,
                     'days_ago': days_ago_value,
@@ -207,18 +208,39 @@ def parse_youtube_shorts(query, limit=1000, days_ago=30, strict_query_match=True
             traceback.print_exc()
 
     # Сортируем результаты по просмотрам
-    results.sort(key=lambda x: int(x.get('views', 0)), reverse=True)
+    results.sort(key=lambda x: _safe_int(x.get('views', 0)), reverse=True)
 
     # Выводим статистику по метрикам
     if results:
-        with_likes = len([v for v in results if int(v.get('likes', 0)) > 0])
-        with_comments = len([v for v in results if int(v.get('comments', 0)) > 0])
-        with_shares = len([v for v in results if int(v.get('shares', 0)) > 0])
+        # Безопасно подсчитываем метрики
+        with_likes = sum(1 for v in results if _safe_int(v.get('likes', 0)) > 0)
+        with_comments = sum(1 for v in results if _safe_int(v.get('comments', 0)) > 0)
+        with_shares = sum(1 for v in results if _safe_int(v.get('shares', 0)) > 0)
         
         print(f"Статистика метрик: видео с лайками: {with_likes}/{len(results)}, с комментариями: {with_comments}/{len(results)}, с репостами: {with_shares}/{len(results)}")
 
     # Возвращаем результаты в пределах запрошенного лимита
     return results[:limit]
+
+def _safe_str(value):
+    """Безопасно преобразует значение в строку"""
+    if value is None:
+        return "0"
+    try:
+        return str(value)
+    except:
+        return "0"
+
+def _safe_int(value):
+    """Безопасно преобразует значение в целое число"""
+    if value is None:
+        return 0
+    if isinstance(value, int):
+        return value
+    try:
+        return int(float(value))
+    except (ValueError, TypeError):
+        return 0
 
 def _clean_count(count_str):
     """Преобразует строку с числом в число"""
